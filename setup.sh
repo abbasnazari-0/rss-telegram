@@ -20,6 +20,9 @@ fi
 
 # گرفتن یوزر اصلی (نه root)
 ACTUAL_USER=$(logname 2>/dev/null || echo $SUDO_USER)
+if [ -z "$ACTUAL_USER" ] || [ "$ACTUAL_USER" = "root" ]; then
+    ACTUAL_USER="root"
+fi
 ACTUAL_HOME=$(eval echo ~$ACTUAL_USER)
 
 echo -e "${BLUE}👤 نصب برای کاربر: $ACTUAL_USER${NC}"
@@ -33,7 +36,9 @@ if ! command -v docker &> /dev/null; then
     rm get-docker.sh
     systemctl enable docker
     systemctl start docker
-    usermod -aG docker $ACTUAL_USER
+    if [ "$ACTUAL_USER" != "root" ]; then
+        usermod -aG docker $ACTUAL_USER
+    fi
     echo -e "${GREEN}✅ Docker نصب شد${NC}"
 else
     echo -e "${GREEN}✅ Docker از قبل نصب است${NC}"
@@ -95,13 +100,19 @@ API_HASH=$api_hash
 PHONE=$phone
 EOF
 
-chown $ACTUAL_USER:$ACTUAL_USER .env
+if [ "$ACTUAL_USER" != "root" ]; then
+    chown $ACTUAL_USER:$ACTUAL_USER .env
+fi
 echo -e "${GREEN}✅ فایل .env ساخته شد${NC}"
 echo ""
 
 # Build کردن
 echo -e "${YELLOW}🔨 در حال build کردن Docker image...${NC}"
-sudo -u $ACTUAL_USER docker-compose build
+if [ "$ACTUAL_USER" != "root" ]; then
+    sudo -u $ACTUAL_USER docker-compose build
+else
+    docker-compose build
+fi
 echo ""
 
 # لاگین تعاملی
@@ -117,39 +128,59 @@ read -p "آماده هستید؟ (Enter را بزنید) "
 # اجرای موقت برای login
 echo ""
 echo -e "${YELLOW}⏳ در انتظار کد تایید...${NC}"
-sudo -u $ACTUAL_USER docker-compose run --rm telegram-rss python3 - << 'PYTHON_SCRIPT'
+
+# ساخت اسکریپت لاگین موقت
+cat > /tmp/telegram_login.py << 'PYEOF'
 import asyncio
 from telethon import TelegramClient
 import os
+import sys
 
 API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
 PHONE = os.getenv('PHONE')
 
 async def login():
-    client = TelegramClient('session_name', API_ID, API_HASH)
-    await client.start(phone=PHONE)
-    print("✅ لاگین موفقیت‌آمیز بود!")
-    me = await client.get_me()
-    print(f"👤 شما به عنوان {me.first_name} وارد شدید")
-    await client.disconnect()
+    try:
+        client = TelegramClient('session_name', API_ID, API_HASH)
+        await client.start(phone=PHONE)
+        print("\n✅ لاگین موفقیت‌آمیز بود!")
+        me = await client.get_me()
+        print(f"👤 شما به عنوان {me.first_name} وارد شدید\n")
+        await client.disconnect()
+        return True
+    except Exception as e:
+        print(f"\n❌ خطا: {e}\n")
+        return False
 
-asyncio.run(login())
-PYTHON_SCRIPT
+result = asyncio.run(login())
+sys.exit(0 if result else 1)
+PYEOF
 
-if [ $? -eq 0 ]; then
-    echo ""
+if [ "$ACTUAL_USER" != "root" ]; then
+    sudo -u $ACTUAL_USER docker-compose run --rm telegram-rss python3 /tmp/telegram_login.py
+else
+    docker-compose run --rm telegram-rss python3 /tmp/telegram_login.py
+fi
+
+LOGIN_RESULT=$?
+rm -f /tmp/telegram_login.py
+
+if [ $LOGIN_RESULT -eq 0 ]; then
     echo -e "${GREEN}✅ لاگین با موفقیت انجام شد!${NC}"
     echo ""
 else
-    echo ""
     echo -e "${RED}❌ خطا در لاگین! لطفاً دوباره تلاش کنید.${NC}"
     exit 1
 fi
 
 # اجرای دائمی
 echo -e "${YELLOW}🚀 در حال راه‌اندازی سرویس...${NC}"
-sudo -u $ACTUAL_USER docker-compose up -d
+if [ "$ACTUAL_USER" != "root" ]; then
+    sudo -u $ACTUAL_USER docker-compose up -d
+else
+    docker-compose up -d
+fi
 
 sleep 3
 
@@ -170,6 +201,7 @@ echo "   🌐 Network:  http://$SERVER_IP:8000"
 echo ""
 echo "📖 مستندات API:"
 echo "   http://localhost:8000/docs"
+echo "   http://$SERVER_IP:8000/docs"
 echo ""
 echo "🧪 تست سریع:"
 echo "   curl http://localhost:8000/health"
@@ -185,5 +217,11 @@ echo "   docker-compose down     # حذف کامل"
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo -e "${YELLOW}💡 نکته: برای استفاده بدون sudo، لاگ‌اوت و دوباره لاگین کنید${NC}"
+
+if [ "$ACTUAL_USER" != "root" ]; then
+    echo -e "${YELLOW}💡 نکته: برای استفاده بدون sudo، لاگ‌اوت و دوباره لاگین کنید${NC}"
+    echo ""
+fi
+
+echo -e "${GREEN}🎉 از استفاده شما سپاسگزاریم!${NC}"
 echo ""
