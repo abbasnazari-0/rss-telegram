@@ -72,7 +72,8 @@ echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 read -p "Have you obtained API credentials? (y/n) " -n 1 -r
-echo ""
+
+
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}Please get your API credentials first and run again.${NC}"
     exit 1
