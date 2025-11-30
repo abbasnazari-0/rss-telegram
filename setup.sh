@@ -21,10 +21,13 @@ echo -e "${BLUE}Telegram RSS Generator - Setup${NC}"
 echo -e "${BLUE}========================================${NC}\n"
 
 # Check if running as root
+IS_ROOT=0
 if [ "$EUID" -eq 0 ]; then 
-    echo -e "${RED}❌ Please do not run this script as root${NC}"
-    echo -e "${YELLOW}Run as normal user: ./setup.sh${NC}\n"
-    exit 1
+    IS_ROOT=1
+    echo -e "${YELLOW}⚠️  Running as root user${NC}"
+    echo -e "${YELLOW}Installing as system-wide service...${NC}\n"
+else
+    echo -e "${GREEN}✅ Running as normal user${NC}\n"
 fi
 
 # Function to check if command exists
@@ -105,13 +108,37 @@ fi
 echo -e "${BLUE}[6/7]${NC} Setting up systemd service..."
 
 SERVICE_FILE="rss-telegram.service"
-SYSTEMD_DIR="$HOME/.config/systemd/user"
 
-# Create systemd user directory if it doesn't exist
-mkdir -p "$SYSTEMD_DIR"
+if [ "$IS_ROOT" -eq 1 ]; then
+    # System-wide service configuration
+    SYSTEMD_DIR="/etc/systemd/system"
+    
+    # Create service file for root
+    cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Telegram RSS Generator Service
+After=network.target
 
-# Create service file
-cat > "$SERVICE_FILE" <<EOF
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$SCRIPT_DIR
+Environment="PATH=$SCRIPT_DIR/venv/bin"
+ExecStart=$SCRIPT_DIR/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+else
+    # User service configuration
+    SYSTEMD_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SYSTEMD_DIR"
+
+    # Create service file for user
+    cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Telegram RSS Generator Service
 After=network.target
@@ -127,26 +154,45 @@ RestartSec=10
 [Install]
 WantedBy=default.target
 EOF
+fi
 
 # Copy service file to systemd directory
 cp "$SERVICE_FILE" "$SYSTEMD_DIR/"
-echo -e "${GREEN}✅ Service file created${NC}"
+echo -e "${GREEN}✅ Service file created at $SYSTEMD_DIR/$SERVICE_FILE${NC}"
 
 # Reload systemd
-systemctl --user daemon-reload
+if [ "$IS_ROOT" -eq 1 ]; then
+    systemctl daemon-reload
+else
+    systemctl --user daemon-reload
+fi
 echo -e "${GREEN}✅ Systemd reloaded${NC}\n"
 
 # Step 7: Service management
 echo -e "${BLUE}[7/7]${NC} Starting service..."
-systemctl --user enable rss-telegram.service
-systemctl --user start rss-telegram.service
 
-if systemctl --user is-active --quiet rss-telegram.service; then
-    echo -e "${GREEN}✅ Service started successfully${NC}\n"
+if [ "$IS_ROOT" -eq 1 ]; then
+    systemctl enable rss-telegram.service
+    systemctl start rss-telegram.service
+    
+    if systemctl is-active --quiet rss-telegram.service; then
+        echo -e "${GREEN}✅ Service started successfully${NC}\n"
+    else
+        echo -e "${RED}❌ Service failed to start${NC}"
+        echo -e "${YELLOW}Check logs with: journalctl -u rss-telegram.service -f${NC}\n"
+        exit 1
+    fi
 else
-    echo -e "${RED}❌ Service failed to start${NC}"
-    echo -e "${YELLOW}Check logs with: journalctl --user -u rss-telegram.service -f${NC}\n"
-    exit 1
+    systemctl --user enable rss-telegram.service
+    systemctl --user start rss-telegram.service
+    
+    if systemctl --user is-active --quiet rss-telegram.service; then
+        echo -e "${GREEN}✅ Service started successfully${NC}\n"
+    else
+        echo -e "${RED}❌ Service failed to start${NC}"
+        echo -e "${YELLOW}Check logs with: journalctl --user -u rss-telegram.service -f${NC}\n"
+        exit 1
+    fi
 fi
 
 # Final summary
@@ -155,11 +201,19 @@ echo -e "${GREEN}✅ Setup completed successfully!${NC}"
 echo -e "${GREEN}========================================${NC}\n"
 
 echo -e "${BLUE}Service Commands:${NC}"
-echo -e "  Start:   ${YELLOW}systemctl --user start rss-telegram.service${NC}"
-echo -e "  Stop:    ${YELLOW}systemctl --user stop rss-telegram.service${NC}"
-echo -e "  Restart: ${YELLOW}systemctl --user restart rss-telegram.service${NC}"
-echo -e "  Status:  ${YELLOW}systemctl --user status rss-telegram.service${NC}"
-echo -e "  Logs:    ${YELLOW}journalctl --user -u rss-telegram.service -f${NC}\n"
+if [ "$IS_ROOT" -eq 1 ]; then
+    echo -e "  Start:   ${YELLOW}systemctl start rss-telegram.service${NC}"
+    echo -e "  Stop:    ${YELLOW}systemctl stop rss-telegram.service${NC}"
+    echo -e "  Restart: ${YELLOW}systemctl restart rss-telegram.service${NC}"
+    echo -e "  Status:  ${YELLOW}systemctl status rss-telegram.service${NC}"
+    echo -e "  Logs:    ${YELLOW}journalctl -u rss-telegram.service -f${NC}\n"
+else
+    echo -e "  Start:   ${YELLOW}systemctl --user start rss-telegram.service${NC}"
+    echo -e "  Stop:    ${YELLOW}systemctl --user stop rss-telegram.service${NC}"
+    echo -e "  Restart: ${YELLOW}systemctl --user restart rss-telegram.service${NC}"
+    echo -e "  Status:  ${YELLOW}systemctl --user status rss-telegram.service${NC}"
+    echo -e "  Logs:    ${YELLOW}journalctl --user -u rss-telegram.service -f${NC}\n"
+fi
 
 echo -e "${BLUE}API Endpoints:${NC}"
 echo -e "  Health:  ${YELLOW}curl http://localhost:8000/health${NC}"
