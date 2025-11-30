@@ -1,227 +1,170 @@
 #!/bin/bash
 
-echo "🚀 Telegram RSS API - Automated Installer"
-echo "=========================================="
-echo ""
+# Telegram RSS Generator - Setup Script
+# This script will install dependencies, configure environment, and setup systemd service
 
-# Colors
+set -e  # Exit on any error
+
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
 YELLOW='\033[1;33m'
-NC='\033[0m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}Telegram RSS Generator - Setup${NC}"
+echo -e "${BLUE}========================================${NC}\n"
 
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}Error: Please run as root${NC}"
-    echo "Usage: sudo bash setup.sh"
+if [ "$EUID" -eq 0 ]; then 
+    echo -e "${RED}❌ Please do not run this script as root${NC}"
+    echo -e "${YELLOW}Run as normal user: ./setup.sh${NC}\n"
     exit 1
 fi
 
-# Get actual user (not root)
-ACTUAL_USER=$(logname 2>/dev/null || echo $SUDO_USER)
-if [ -z "$ACTUAL_USER" ] || [ "$ACTUAL_USER" = "root" ]; then
-    ACTUAL_USER="root"
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Step 1: Check Python installation
+echo -e "${BLUE}[1/7]${NC} Checking Python installation..."
+if ! command_exists python3; then
+    echo -e "${RED}❌ Python 3 is not installed${NC}"
+    echo -e "${YELLOW}Please install Python 3.8 or higher${NC}\n"
+    exit 1
 fi
-ACTUAL_HOME=$(eval echo ~$ACTUAL_USER)
 
-echo -e "${BLUE}Installing for user: $ACTUAL_USER${NC}"
-echo ""
+PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
+echo -e "${GREEN}✅ Python $PYTHON_VERSION found${NC}\n"
 
-# Install Docker
-if ! command -v docker &> /dev/null; then
-    echo -e "${YELLOW}Docker not found. Installing...${NC}"
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm get-docker.sh
-    systemctl enable docker
-    systemctl start docker
-    if [ "$ACTUAL_USER" != "root" ]; then
-        usermod -aG docker $ACTUAL_USER
-    fi
-    echo -e "${GREEN}Docker installed successfully${NC}"
+# Step 2: Create virtual environment
+echo -e "${BLUE}[2/7]${NC} Creating virtual environment..."
+if [ ! -d "venv" ]; then
+    python3 -m venv venv
+    echo -e "${GREEN}✅ Virtual environment created${NC}\n"
 else
-    echo -e "${GREEN}Docker is already installed${NC}"
+    echo -e "${YELLOW}⚠️  Virtual environment already exists${NC}\n"
 fi
 
-# Install Docker Compose
-if ! command -v docker-compose &> /dev/null; then
-    echo -e "${YELLOW}Installing Docker Compose...${NC}"
-    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-    echo -e "${GREEN}Docker Compose installed successfully${NC}"
+# Step 3: Install dependencies
+echo -e "${BLUE}[3/7]${NC} Installing Python dependencies..."
+source venv/bin/activate
+pip install --upgrade pip > /dev/null 2>&1
+pip install -r requirements.txt
+echo -e "${GREEN}✅ Dependencies installed${NC}\n"
+
+# Step 4: Setup environment file
+echo -e "${BLUE}[4/7]${NC} Setting up environment configuration..."
+if [ ! -f ".env" ]; then
+    echo -e "${YELLOW}⚠️  .env file not found. Creating from template...${NC}"
+    cp .env.example .env
+    
+    echo -e "\n${YELLOW}Please enter your Telegram API credentials:${NC}"
+    echo -e "${BLUE}(Get them from: https://my.telegram.org/apps)${NC}\n"
+    
+    read -p "API_ID: " api_id
+    read -p "API_HASH: " api_hash
+    read -p "PHONE (e.g., +989123456789): " phone
+    read -p "BASE_URL (e.g., http://your-server.com:8000): " base_url
+    
+    # Update .env file
+    sed -i.bak "s|API_ID=.*|API_ID=$api_id|g" .env
+    sed -i.bak "s|API_HASH=.*|API_HASH=$api_hash|g" .env
+    sed -i.bak "s|PHONE=.*|PHONE=$phone|g" .env
+    sed -i.bak "s|BASE_URL=.*|BASE_URL=$base_url|g" .env
+    rm .env.bak
+    
+    echo -e "${GREEN}✅ Environment file configured${NC}\n"
+else
+    echo -e "${GREEN}✅ .env file already exists${NC}\n"
 fi
 
-echo ""
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${YELLOW}How to get Telegram API credentials:${NC}"
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo "1. Go to: ${GREEN}https://my.telegram.org${NC}"
-echo ""
-echo "2. Login with your phone number"
-echo ""
-echo "3. Click on 'API development tools'"
-echo ""
-echo "4. Create a new application (any name)"
-echo ""
-echo "5. Note down these two values:"
-echo "   - api_id (a number like: 12345678)"
-echo "   - api_hash (a string like: 0a1b2c3d...)"
-echo ""
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-read -p "Have you obtained API credentials? (y/n) " -n 1 -r
-
-
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "${YELLOW}Please get your API credentials first and run again.${NC}"
-    exit 1
+# Step 5: Login to Telegram
+echo -e "${BLUE}[5/7]${NC} Telegram authentication..."
+if [ ! -f "session_name.session" ]; then
+    echo -e "${YELLOW}⚠️  No session file found. Starting login process...${NC}\n"
+    python3 login.py
+    
+    if [ $? -eq 0 ]; then
+        echo -e "\n${GREEN}✅ Successfully logged in to Telegram${NC}\n"
+    else
+        echo -e "\n${RED}❌ Login failed${NC}"
+        exit 1
+    fi
+else
+    echo -e "${GREEN}✅ Session file already exists${NC}\n"
 fi
 
-echo ""
-echo -e "${YELLOW}Please enter your information:${NC}"
-echo ""
+# Step 6: Setup systemd service
+echo -e "${BLUE}[6/7]${NC} Setting up systemd service..."
 
-read -p "API_ID: " api_id
-read -p "API_HASH: " api_hash
-read -p "Phone number (with country code like +989123456789): " phone
+SERVICE_FILE="rss-telegram.service"
+SYSTEMD_DIR="$HOME/.config/systemd/user"
 
-# Validate inputs
-if [[ -z "$api_id" || -z "$api_hash" || -z "$phone" ]]; then
-    echo -e "${RED}Error: All fields are required!${NC}"
-    exit 1
-fi
+# Create systemd user directory if it doesn't exist
+mkdir -p "$SYSTEMD_DIR"
 
-# Create .env file
-cat > .env << EOF
-API_ID=$api_id
-API_HASH=$api_hash
-PHONE=$phone
+# Create service file
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Telegram RSS Generator Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$SCRIPT_DIR
+Environment="PATH=$SCRIPT_DIR/venv/bin"
+ExecStart=$SCRIPT_DIR/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
 EOF
 
-if [ "$ACTUAL_USER" != "root" ]; then
-    chown $ACTUAL_USER:$ACTUAL_USER .env
-fi
-echo -e "${GREEN}.env file created successfully${NC}"
-echo ""
+# Copy service file to systemd directory
+cp "$SERVICE_FILE" "$SYSTEMD_DIR/"
+echo -e "${GREEN}✅ Service file created${NC}"
 
-# Build Docker image
-echo -e "${YELLOW}Building Docker image...${NC}"
-if [ "$ACTUAL_USER" != "root" ]; then
-    sudo -u $ACTUAL_USER docker-compose build
+# Reload systemd
+systemctl --user daemon-reload
+echo -e "${GREEN}✅ Systemd reloaded${NC}\n"
+
+# Step 7: Service management
+echo -e "${BLUE}[7/7]${NC} Starting service..."
+systemctl --user enable rss-telegram.service
+systemctl --user start rss-telegram.service
+
+if systemctl --user is-active --quiet rss-telegram.service; then
+    echo -e "${GREEN}✅ Service started successfully${NC}\n"
 else
-    docker-compose build
-fi
-echo ""
-
-# Interactive login
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${YELLOW}Now you need to login to your Telegram account${NC}"
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo "A verification code will be sent to your Telegram."
-echo "If you have Two-Step Verification, password is also required."
-echo ""
-read -p "Ready? (Press Enter to continue) " 
-
-# Temporary login script
-echo ""
-echo -e "${YELLOW}Waiting for verification code...${NC}"
-
-cat > /tmp/telegram_login.py << 'PYEOF'
-import asyncio
-from telethon import TelegramClient
-import os
-import sys
-
-API_ID = int(os.getenv('API_ID'))
-API_HASH = os.getenv('API_HASH')
-PHONE = os.getenv('PHONE')
-
-async def login():
-    try:
-        client = TelegramClient('session_name', API_ID, API_HASH)
-        await client.start(phone=PHONE)
-        print("\n✅ Login successful!")
-        me = await client.get_me()
-        print(f"👤 Logged in as: {me.first_name}\n")
-        await client.disconnect()
-        return True
-    except Exception as e:
-        print(f"\n❌ Error: {e}\n")
-        return False
-
-result = asyncio.run(login())
-sys.exit(0 if result else 1)
-PYEOF
-
-if [ "$ACTUAL_USER" != "root" ]; then
-    sudo -u $ACTUAL_USER docker-compose run --rm telegram-rss python3 /tmp/telegram_login.py
-else
-    docker-compose run --rm telegram-rss python3 /tmp/telegram_login.py
-fi
-
-LOGIN_RESULT=$?
-rm -f /tmp/telegram_login.py
-
-if [ $LOGIN_RESULT -eq 0 ]; then
-    echo -e "${GREEN}Login completed successfully!${NC}"
-    echo ""
-else
-    echo -e "${RED}Login failed! Please try again.${NC}"
+    echo -e "${RED}❌ Service failed to start${NC}"
+    echo -e "${YELLOW}Check logs with: journalctl --user -u rss-telegram.service -f${NC}\n"
     exit 1
 fi
 
-# Start service
-echo -e "${YELLOW}Starting service...${NC}"
-if [ "$ACTUAL_USER" != "root" ]; then
-    sudo -u $ACTUAL_USER docker-compose up -d
-else
-    docker-compose up -d
-fi
+# Final summary
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}✅ Setup completed successfully!${NC}"
+echo -e "${GREEN}========================================${NC}\n"
 
-sleep 3
+echo -e "${BLUE}Service Commands:${NC}"
+echo -e "  Start:   ${YELLOW}systemctl --user start rss-telegram.service${NC}"
+echo -e "  Stop:    ${YELLOW}systemctl --user stop rss-telegram.service${NC}"
+echo -e "  Restart: ${YELLOW}systemctl --user restart rss-telegram.service${NC}"
+echo -e "  Status:  ${YELLOW}systemctl --user status rss-telegram.service${NC}"
+echo -e "  Logs:    ${YELLOW}journalctl --user -u rss-telegram.service -f${NC}\n"
 
-# Show status
-echo ""
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}✅ Installation completed successfully!${NC}"
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
+echo -e "${BLUE}API Endpoints:${NC}"
+echo -e "  Health:  ${YELLOW}curl http://localhost:8000/health${NC}"
+echo -e "  RSS:     ${YELLOW}curl http://localhost:8000/rss?channel=@durov&limit=20${NC}"
+echo -e "  JSON:    ${YELLOW}curl http://localhost:8000/json?channel=@durov&limit=10${NC}"
+echo -e "  Docs:    ${YELLOW}http://localhost:8000/docs${NC}\n"
 
-# Get server IP
-SERVER_IP=$(hostname -I | awk '{print $1}')
-
-echo "📡 API is available at:"
-echo ""
-echo "   🌐 Local:    http://localhost:8000"
-echo "   🌐 Network:  http://$SERVER_IP:8000"
-echo ""
-echo "📖 API Documentation:"
-echo "   http://localhost:8000/docs"
-echo "   http://$SERVER_IP:8000/docs"
-echo ""
-echo "🧪 Quick test:"
-echo "   curl http://localhost:8000/health"
-echo ""
-echo "📊 View logs:"
-echo "   docker-compose logs -f"
-echo ""
-echo "🔄 Service management:"
-echo "   docker-compose restart  # Restart"
-echo "   docker-compose stop     # Stop"
-echo "   docker-compose start    # Start"
-echo "   docker-compose down     # Remove completely"
-echo ""
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-
-if [ "$ACTUAL_USER" != "root" ]; then
-    echo -e "${YELLOW}💡 Note: For using docker without sudo, logout and login again${NC}"
-    echo ""
-fi
-
-echo -e "${GREEN}🎉 Thank you for using Telegram RSS API!${NC}"
-echo ""
+echo -e "${GREEN}🚀 Your RSS service is now running!${NC}\n"

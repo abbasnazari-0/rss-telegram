@@ -1,5 +1,5 @@
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from telethon import TelegramClient
@@ -11,11 +11,17 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# بارگذاری متغیرهای محیطی از فایل .env
+load_dotenv()
 
 # تنظیمات تلگرام از environment variables
 API_ID = int(os.getenv('API_ID', '0'))
 API_HASH = os.getenv('API_HASH', '')
 PHONE = os.getenv('PHONE', '')
+BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
+SESSION_NAME = os.getenv('SESSION_NAME', 'session_name')
 
 if not all([API_ID, API_HASH, PHONE]):
     raise ValueError("❌ لطفاً API_ID, API_HASH و PHONE را در .env تنظیم کنید")
@@ -41,9 +47,10 @@ client = None
 async def startup_event():
     """راه‌اندازی کلاینت تلگرام"""
     global client
-    client = TelegramClient('session_name', API_ID, API_HASH)
+    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
     await client.start(phone=PHONE)
     print("✅ کلاینت تلگرام متصل شد")
+    print(f"🌐 Base URL: {BASE_URL}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -212,10 +219,11 @@ def group_album_messages(messages, limit=None):
     
     return result
 
-def create_rss_feed(channel_info, messages, channel_link, base_url, original_limit):
+def create_rss_feed(channel_info, messages, channel_link, original_limit):
     """ساخت فید RSS"""
     # گروه‌بندی پیام‌های آلبومی با اعمال limit بعد از گروه‌بندی
     messages = group_album_messages(messages, limit=original_limit)
+    base_url = BASE_URL
     
     rss = ET.Element('rss', version='2.0', attrib={
         'xmlns:atom': 'http://www.w3.org/2005/Atom',
@@ -333,18 +341,20 @@ async def get_rss(channel: str, limit: int = 50):
     if not client or not client.is_connected():
         raise HTTPException(status_code=503, detail="سرویس در دسترس نیست")
     
-    # برای گرفتن limit پست، ممکنه نیاز باشه پیام‌های بیشتری بگیریم
-    # چون ممکنه آلبوم‌ها چند پیام باشن
-    fetch_limit = min(limit * 3, 1000)  # حداکثر 1000 پیام
-    
-    channel_info, messages = await get_channel_messages(channel, fetch_limit)
-    
-    # ساخت base URL برای لینک‌های media
-    base_url = "http://localhost:8000"  # این رو باید از request header بگیری در production
-    
-    rss_content = create_rss_feed(channel_info, messages, channel, base_url, limit)
-    
-    return Response(content=rss_content, media_type="application/xml")
+    try:
+        # برای گرفتن limit پست، ممکنه نیاز باشه پیام‌های بیشتری بگیریم
+        # چون ممکنه آلبوم‌ها چند پیام باشن
+        fetch_limit = min(limit * 3, 1000)  # حداکثر 1000 پیام
+        
+        channel_info, messages = await get_channel_messages(channel, fetch_limit)
+        
+        rss_content = create_rss_feed(channel_info, messages, channel, limit)
+        
+        return Response(content=rss_content, media_type="application/xml")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"خطا در ساخت RSS: {str(e)}")
 
 @app.get("/json")
 async def get_json(channel: str, limit: int = 50):
