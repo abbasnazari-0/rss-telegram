@@ -1,4 +1,4 @@
- #!/bin/bash
+#!/bin/bash
 
 echo "🚀 Telegram RSS API - Automated Installer"
 echo "=========================================="
