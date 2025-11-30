@@ -1,8 +1,8 @@
-# 🚀 Telegram RSS API
+# Telegram RSS Generator API 📢
 
-تبدیل کانال‌های تلگرام (پابلیک و پرایوت) به RSS فید با یک خط دستور!
+Convert Telegram channels into RSS feeds automatically. This tool runs as a system service and handles media downloads.
 
-## ✨ ویژگی‌ها
+## 🚀 Quick Install (Ubuntu/Debian)
 
 - 🔐 پشتیبانی کامل از کانال‌های پرایوت و پابلیک
 - 📸 دانلود و سرو عکس‌ها (تک عکس و آلبوم)
