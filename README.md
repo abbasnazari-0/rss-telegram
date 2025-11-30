@@ -14,12 +14,12 @@
 
 ## 🚀 نصب سریع (یک خط!)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/telegram-rss-api/main/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com//abbasnazari-0/rss-telegram/main/setup.sh | sudo bash
 ```
 
 یا دستی:
 ```bash
-git clone https://github.com/YOUR_USERNAME/telegram-rss-api.git
+git clone https://github.com/abbasnazari-0/rss-telegram.git
 cd telegram-rss-api
 sudo chmod +x setup.sh
 sudo ./setup.sh
