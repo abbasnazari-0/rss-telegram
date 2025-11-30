@@ -393,7 +393,7 @@ async def get_json(channel: str, limit: int = 50):
                 "media": [
                     {
                         "type": m['type'],
-                        "id": m['id'],
+                        "id": str(m['id']),  # Convert to string to avoid JS precision issues
                         "download_url": f"/download/{channel_info.id}/{msg.id}/{m['id']}"
                     }
                     for m in msg.media_files
