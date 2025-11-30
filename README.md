@@ -12,12 +12,7 @@ Convert Telegram channels into RSS feeds automatically. This tool runs as a syst
 - 🔄 Auto-restart و healthcheck
 - ⚡ پشتیبانی از limit بالا (تا 1000 پست)
 
-## 🚀 نصب سریع (یک خط!)
-```bash
-curl -fsSL https://raw.githubusercontent.com//abbasnazari-0/rss-telegram/main/setup.sh | sudo bash
-```
-
-یا دستی:
+## 🚀 نصب سریع
 ```bash
 git clone https://github.com/abbasnazari-0/rss-telegram.git
 cd telegram-rss-api
