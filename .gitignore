@@ -1,0 +1,23 @@
+# Environment variables
+.env
+
+# Session files
+*.session
+*.session-journal
+
+# Media files
+media/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.pyc
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
