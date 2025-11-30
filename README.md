@@ -1,187 +1,227 @@
-# 🚀 Telegram RSS API
+#!/bin/bash
 
-تبدیل کانال‌های تلگرام (پابلیک و پرایوت) به RSS فید با یک خط دستور!
+echo "🚀 Telegram RSS API - نصب خودکار"
+echo "========================================="
+echo ""
 
-## ✨ ویژگی‌ها
+# رنگ‌ها
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-- 🔐 پشتیبانی کامل از کانال‌های پرایوت و پابلیک
-- 📸 دانلود و سرو عکس‌ها (تک عکس و آلبوم)
-- 📡 REST API با FastAPI
-- 🐳 نصب آسان با Docker
-- 📱 خروجی RSS و JSON
-- 🔄 Auto-restart و healthcheck
-- ⚡ پشتیبانی از limit بالا (تا 1000 پست)
+# چک کردن root
+if [ "$EUID" -ne 0 ]; then 
+    echo -e "${RED}❌ لطفاً با sudo اجرا کنید${NC}"
+    echo "مثال: sudo bash setup.sh"
+    exit 1
+fi
 
-## 🚀 نصب سریع (یک خط!)
-```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/telegram-rss-api/main/setup.sh | sudo bash
-```
+# گرفتن یوزر اصلی (نه root)
+ACTUAL_USER=$(logname 2>/dev/null || echo $SUDO_USER)
+if [ -z "$ACTUAL_USER" ] || [ "$ACTUAL_USER" = "root" ]; then
+    ACTUAL_USER="root"
+fi
+ACTUAL_HOME=$(eval echo ~$ACTUAL_USER)
 
-یا دستی:
-```bash
-git clone https://github.com/YOUR_USERNAME/telegram-rss-api.git
-cd telegram-rss-api
-sudo chmod +x setup.sh
-sudo ./setup.sh
-```
+echo -e "${BLUE}👤 نصب برای کاربر: $ACTUAL_USER${NC}"
+echo ""
 
-اسکریپت نصب به صورت خودکار:
-1. ✅ Docker و Docker Compose را نصب می‌کند
-2. ✅ اطلاعات API شما را می‌گیرد
-3. ✅ شما را لاگین می‌کند
-4. ✅ سرویس را راه‌اندازی می‌کند
+# نصب Docker
+if ! command -v docker &> /dev/null; then
+    echo -e "${YELLOW}📦 Docker نصب نیست. در حال نصب...${NC}"
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
+    rm get-docker.sh
+    systemctl enable docker
+    systemctl start docker
+    if [ "$ACTUAL_USER" != "root" ]; then
+        usermod -aG docker $ACTUAL_USER
+    fi
+    echo -e "${GREEN}✅ Docker نصب شد${NC}"
+else
+    echo -e "${GREEN}✅ Docker از قبل نصب است${NC}"
+fi
 
-## 📋 پیش‌نیازها
+# نصب Docker Compose
+if ! command -v docker-compose &> /dev/null; then
+    echo -e "${YELLOW}📦 در حال نصب Docker Compose...${NC}"
+    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+    echo -e "${GREEN}✅ Docker Compose نصب شد${NC}"
+fi
 
-1. API credentials از https://my.telegram.org
-2. سرور Ubuntu/Debian با دسترسی root
-3. شماره تلگرام فعال
+echo ""
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}📋 راهنمای دریافت اطلاعات تلگرام:${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "1. به آدرس زیر بروید:"
+echo -e "   ${GREEN}https://my.telegram.org${NC}"
+echo ""
+echo "2. با شماره تلگرام خود وارد شوید"
+echo ""
+echo "3. روی 'API development tools' کلیک کنید"
+echo ""
+echo "4. یک اپلیکیشن جدید بسازید (اسم دلخواه)"
+echo ""
+echo "5. دو مقدار زیر را یادداشت کنید:"
+echo "   - api_id (یک عدد مثل: 12345678)"
+echo "   - api_hash (یک رشته مثل: 0a1b2c3d...)"
+echo ""
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+read -p "آیا اطلاعات API را دریافت کرده‌اید؟ (y/n) " -n 1 -r
+echo ""
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo -e "${YELLOW}لطفاً ابتدا اطلاعات API را دریافت کنید و دوباره اجرا کنید.${NC}"
+    exit 1
+fi
 
-## 📖 استفاده از API
+echo ""
+echo -e "${YELLOW}📝 لطفاً اطلاعات خود را وارد کنید:${NC}"
+echo ""
 
-### دریافت RSS فید:
-```bash
-# کانال پابلیک
-curl "http://localhost:8000/rss?channel=@durov&limit=50"
+read -p "API_ID: " api_id
+read -p "API_HASH: " api_hash
+read -p "شماره تلگرام (با کد کشور مثل +989123456789): " phone
 
-# کانال پرایوت با Channel ID
-curl "http://localhost:8000/rss?channel=-1001234567890&limit=20"
+# اعتبارسنجی ورودی‌ها
+if [[ -z "$api_id" || -z "$api_hash" || -z "$phone" ]]; then
+    echo -e "${RED}❌ همه فیلدها الزامی هستند!${NC}"
+    exit 1
+fi
 
-# کانال پرایوت با لینک دعوت
-curl "http://localhost:8000/rss?channel=https://t.me/+ABC123&limit=10"
-```
+# ساخت .env
+cat > .env << EOF
+API_ID=$api_id
+API_HASH=$api_hash
+PHONE=$phone
+EOF
 
-### دریافت JSON:
-```bash
-curl "http://localhost:8000/json?channel=@telegram&limit=30"
-```
+if [ "$ACTUAL_USER" != "root" ]; then
+    chown $ACTUAL_USER:$ACTUAL_USER .env
+fi
+echo -e "${GREEN}✅ فایل .env ساخته شد${NC}"
+echo ""
 
-### دانلود عکس:
-```bash
-curl "http://localhost:8000/download/{channel_id}/{msg_id}/{media_id}" -o image.jpg
-```
+# Build کردن
+echo -e "${YELLOW}🔨 در حال build کردن Docker image...${NC}"
+if [ "$ACTUAL_USER" != "root" ]; then
+    sudo -u $ACTUAL_USER docker-compose build
+else
+    docker-compose build
+fi
+echo ""
 
-### مستندات کامل API:
-```
-http://YOUR_SERVER:8000/docs
-```
+# لاگین تعاملی
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}🔐 حالا باید وارد اکانت تلگرام خود شوید${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "کد تایید به تلگرام شما ارسال می‌شود."
+echo "اگر Two-Step Verification دارید، پسورد هم لازم است."
+echo ""
+read -p "آماده هستید؟ (Enter را بزنید) " 
 
-## 🛠 مدیریت سرویس
-```bash
-# مشاهده لاگ‌ها
-docker-compose logs -f
+# اجرای موقت برای login
+echo ""
+echo -e "${YELLOW}⏳ در انتظار کد تایید...${NC}"
 
-# ری‌استارت
-docker-compose restart
+# ساخت اسکریپت لاگین موقت
+cat > /tmp/telegram_login.py << 'PYEOF'
+import asyncio
+from telethon import TelegramClient
+import os
+import sys
 
-# خاموش کردن
-docker-compose down
+API_ID = int(os.getenv('API_ID'))
+API_HASH = os.getenv('API_HASH')
+PHONE = os.getenv('PHONE')
 
-# روشن کردن
-docker-compose up -d
+async def login():
+    try:
+        client = TelegramClient('session_name', API_ID, API_HASH)
+        await client.start(phone=PHONE)
+        print("\n✅ لاگین موفقیت‌آمیز بود!")
+        me = await client.get_me()
+        print(f"👤 شما به عنوان {me.first_name} وارد شدید\n")
+        await client.disconnect()
+        return True
+    except Exception as e:
+        print(f"\n❌ خطا: {e}\n")
+        return False
 
-# مشاهده وضعیت
-docker-compose ps
-```
+result = asyncio.run(login())
+sys.exit(0 if result else 1)
+PYEOF
 
-## 🌐 دسترسی از خارج
+if [ "$ACTUAL_USER" != "root" ]; then
+    sudo -u $ACTUAL_USER docker-compose run --rm telegram-rss python3 /tmp/telegram_login.py
+else
+    docker-compose run --rm telegram-rss python3 /tmp/telegram_login.py
+fi
 
-برای دسترسی از اینترنت:
+LOGIN_RESULT=$?
+rm -f /tmp/telegram_login.py
 
-### با Nginx Reverse Proxy:
-```bash
-sudo apt install nginx -y
+if [ $LOGIN_RESULT -eq 0 ]; then
+    echo -e "${GREEN}✅ لاگین با موفقیت انجام شد!${NC}"
+    echo ""
+else
+    echo -e "${RED}❌ خطا در لاگین! لطفاً دوباره تلاش کنید.${NC}"
+    exit 1
+fi
 
-sudo nano /etc/nginx/sites-available/telegram-rss
-```
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
+# اجرای دائمی
+echo -e "${YELLOW}🚀 در حال راه‌اندازی سرویس...${NC}"
+if [ "$ACTUAL_USER" != "root" ]; then
+    sudo -u $ACTUAL_USER docker-compose up -d
+else
+    docker-compose up -d
+fi
 
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-```bash
-sudo ln -s /etc/nginx/sites-available/telegram-rss /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl restart nginx
-```
+sleep 3
 
-### با ngrok (برای تست):
-```bash
-ngrok http 8000
-```
+# نمایش وضعیت
+echo ""
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}✅ نصب با موفقیت کامل شد!${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
 
-## 📊 مثال‌های کاربردی
+# دریافت IP
+SERVER_IP=$(hostname -I | awk '{print $1}')
 
-### استفاده در RSS Reader:
-```
-http://your-server:8000/rss?channel=-1001234567890&limit=100
-```
+echo "📡 API در آدرس‌های زیر در دسترس است:"
+echo ""
+echo "   🌐 Local:    http://localhost:8000"
+echo "   🌐 Network:  http://$SERVER_IP:8000"
+echo ""
+echo "📖 مستندات API:"
+echo "   http://localhost:8000/docs"
+echo "   http://$SERVER_IP:8000/docs"
+echo ""
+echo "🧪 تست سریع:"
+echo "   curl http://localhost:8000/health"
+echo ""
+echo "📊 مشاهده لاگ‌ها:"
+echo "   docker-compose logs -f"
+echo ""
+echo "🔄 مدیریت سرویس:"
+echo "   docker-compose restart  # ری‌استارت"
+echo "   docker-compose stop     # خاموش کردن"
+echo "   docker-compose start    # روشن کردن"
+echo "   docker-compose down     # حذف کامل"
+echo ""
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
 
-### گرفتن آخرین پست‌ها:
-```bash
-curl "http://localhost:8000/json?channel=@channelname&limit=10" | jq '.messages[0]'
-```
+if [ "$ACTUAL_USER" != "root" ]; then
+    echo -e "${YELLOW}💡 نکته: برای استفاده بدون sudo، لاگ‌اوت و دوباره لاگین کنید${NC}"
+    echo ""
+fi
 
-### دانلود همه عکس‌های یک پست:
-```bash
-curl "http://localhost:8000/json?channel=@channel&limit=1" | \
-  jq -r '.messages[0].media[].download_url' | \
-  while read url; do
-    curl "http://localhost:8000$url" -o "image_$(basename $url).jpg"
-  done
-```
-
-## 🔧 عیب‌یابی
-
-### سرویس اجرا نمی‌شود:
-```bash
-docker-compose logs
-```
-
-### مشکل در لاگین:
-1. API credentials را چک کنید
-2. شماره تلگرام را با کد کشور وارد کنید (+98...)
-3. فایل session را پاک کنید و دوباره امتحان کنید:
-```bash
-rm session_name.session*
-docker-compose restart
-```
-
-### پورت 8000 در حال استفاده است:
-در `docker-compose.yml` پورت را تغییر دهید:
-```yaml
-ports:
-  - "8080:8000"  # به جای 8000
-```
-
-## 🤝 مشارکت
-
-مشارکت‌ها خوش‌آمدید! لطفاً:
-1. Fork کنید
-2. یک branch جدید بسازید
-3. تغییرات خود را commit کنید
-4. یک Pull Request ارسال کنید
-
-## 📝 لایسنس
-
-MIT License - استفاده آزاد برای همه!
-
-## 🙏 قدردانی
-
-- [Telethon](https://github.com/LonamiWebs/Telethon) - کتابخانه عالی تلگرام
-- [FastAPI](https://fastapi.tiangolo.com/) - فریمورک سریع و مدرن
-
-## 📞 پشتیبانی
-
-اگر مشکلی داشتید، یک Issue باز کنید یا در Discussions بپرسید.
-
----
-
-ساخته شده با ❤️ برای جامعه متن‌باز
+echo -e "${GREEN}🎉 از استفاده شما سپاسگزاریم!${NC}"
+echo ""
