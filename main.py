@@ -122,6 +122,7 @@ async def get_channel_messages(channel_link: str, limit: int = 50):
                 media_files.append({
                     'type': 'photo',
                     'id': msg.photo.id,
+                    'msg_id': msg.id,  # ID پیام اصلی
                     'access_hash': msg.photo.access_hash,
                     'file_reference': msg.photo.file_reference.hex()
                 })
@@ -132,6 +133,7 @@ async def get_channel_messages(channel_link: str, limit: int = 50):
                     media_files.append({
                         'type': 'photo',
                         'id': photo.id,
+                        'msg_id': msg.id,  # ID پیام اصلی
                         'access_hash': photo.access_hash,
                         'file_reference': photo.file_reference.hex()
                     })
@@ -143,6 +145,7 @@ async def get_channel_messages(channel_link: str, limit: int = 50):
                     media_files.append({
                         'type': 'document',
                         'id': doc.id,
+                        'msg_id': msg.id,  # ID پیام اصلی
                         'access_hash': doc.access_hash,
                         'file_reference': doc.file_reference.hex(),
                         'mime_type': mime_type
@@ -266,7 +269,8 @@ def create_rss_feed(channel_info, messages, channel_link, original_limit):
             
             # اضافه کردن عکس‌ها
             for idx, media in enumerate(msg.media_files):
-                media_url = f"{base_url}/download/{channel_info.id}/{msg.id}/{media['id']}"
+                msg_id = media.get('msg_id', msg.id)  # استفاده از msg_id واقعی هر media
+                media_url = f"{base_url}/download/{channel_info.id}/{msg_id}/{media['id']}"
                 desc_content += f'<img src="{media_url}" alt="Image {idx+1}" style="max-width:100%; margin:5px;"/>'
             
             if desc_content:
@@ -281,7 +285,8 @@ def create_rss_feed(channel_info, messages, channel_link, original_limit):
             if msg.media_files:
                 media_group = ET.SubElement(item, '{http://search.yahoo.com/mrss/}group')
                 for media in msg.media_files:
-                    media_url = f"{base_url}/download/{channel_info.id}/{msg.id}/{media['id']}"
+                    msg_id = media.get('msg_id', msg.id)  # استفاده از msg_id واقعی هر media
+                    media_url = f"{base_url}/download/{channel_info.id}/{msg_id}/{media['id']}"
                     media_content = ET.SubElement(media_group, '{http://search.yahoo.com/mrss/}content')
                     media_content.set('url', media_url)
                     media_content.set('type', 'image/jpeg')
@@ -394,7 +399,8 @@ async def get_json(channel: str, limit: int = 50):
                     {
                         "type": m['type'],
                         "id": str(m['id']),  # Convert to string to avoid JS precision issues
-                        "download_url": f"/download/{channel_info.id}/{msg.id}/{m['id']}"
+                        "msg_id": m.get('msg_id', msg.id),  # ID پیام اصلی این media
+                        "download_url": f"/download/{channel_info.id}/{m.get('msg_id', msg.id)}/{m['id']}"
                     }
                     for m in msg.media_files
                 ] if msg.media_files else []
