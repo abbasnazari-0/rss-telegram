@@ -78,14 +78,16 @@ async def get_channel_messages(channel_link: str, limit: int = 50):
             
             entity = await client.get_entity(channel_link)
         
-        # دریافت پیام‌ها با batch برای limit های بالا
+        # استراتژی جدید: پیام‌های خام رو بگیر، بعد گروه‌بندی کن و limit اعمال کن
         all_messages = []
         offset_id = 0
         
-        # برای limit بالاتر از 100، چند بار درخواست می‌زنیم
-        remaining = limit
-        while remaining > 0:
-            batch_size = min(remaining, 100)  # Telethon حداکثر 100 تا میده
+        # اول یک بار زیاد پیام بگیر (مثلاً 200 تا)
+        # این تضمین می‌کنه که آلبوم‌های ناقص نداریم
+        initial_fetch = min(200, limit * 20)
+        
+        while len(all_messages) < initial_fetch:
+            batch_size = min(initial_fetch - len(all_messages), 100)
             
             messages = await client(GetHistoryRequest(
                 peer=entity,
@@ -99,17 +101,46 @@ async def get_channel_messages(channel_link: str, limit: int = 50):
             ))
             
             if not messages.messages:
-                break  # دیگه پیامی نیست
+                break
             
             all_messages.extend(messages.messages)
-            
-            # آخرین message id رو برای offset بعدی نگه می‌داریم
             offset_id = messages.messages[-1].id
-            remaining -= len(messages.messages)
             
-            # اگه کمتر از batch_size اومد، یعنی تموم شده
             if len(messages.messages) < batch_size:
                 break
+        
+        # چک کن آیا پیام آخر جزو یک آلبوم ناقصه
+        # اگه بود، تا آخر اون آلبوم رو بگیر
+        if all_messages and hasattr(all_messages[-1], 'grouped_id') and all_messages[-1].grouped_id:
+            last_group_id = all_messages[-1].grouped_id
+            
+            # تا زمانی که پیام با همون grouped_id پیدا میشه، ادامه بده
+            while True:
+                extra = await client(GetHistoryRequest(
+                    peer=entity,
+                    limit=20,
+                    offset_date=None,
+                    offset_id=offset_id,
+                    max_id=0,
+                    min_id=0,
+                    add_offset=0,
+                    hash=0
+                ))
+                
+                if not extra.messages:
+                    break
+                
+                # فقط پیام‌هایی که جزو همون آلبوم هستن رو اضافه کن
+                album_continues = False
+                for msg in extra.messages:
+                    if hasattr(msg, 'grouped_id') and msg.grouped_id == last_group_id:
+                        all_messages.append(msg)
+                        offset_id = msg.id
+                        album_continues = True
+                
+                # اگه دیگه از این آلبوم چیزی نبود، بیرون بیا
+                if not album_continues:
+                    break
         
         # استخراج اطلاعات media از هر پیام
         messages_with_media = []
@@ -347,11 +378,8 @@ async def get_rss(channel: str, limit: int = 50):
         raise HTTPException(status_code=503, detail="سرویس در دسترس نیست")
     
     try:
-        # برای گرفتن limit پست، ممکنه نیاز باشه پیام‌های بیشتری بگیریم
-        # چون ممکنه آلبوم‌ها چند پیام باشن
-        fetch_limit = min(limit * 3, 1000)  # حداکثر 1000 پیام
-        
-        channel_info, messages = await get_channel_messages(channel, fetch_limit)
+        # دریافت پیام‌ها (تابع خودش آلبوم‌های ناقص رو کامل می‌کنه)
+        channel_info, messages = await get_channel_messages(channel, limit)
         
         rss_content = create_rss_feed(channel_info, messages, channel, limit)
         
@@ -372,10 +400,8 @@ async def get_json(channel: str, limit: int = 50):
     if not client or not client.is_connected():
         raise HTTPException(status_code=503, detail="سرویس در دسترس نیست")
     
-    # برای گرفتن limit پست، ممکنه نیاز باشه پیام‌های بیشتری بگیریم
-    fetch_limit = min(limit * 3, 1000)
-    
-    channel_info, messages = await get_channel_messages(channel, fetch_limit)
+    # دریافت پیام‌ها (تابع خودش آلبوم‌های ناقص رو کامل می‌کنه)
+    channel_info, messages = await get_channel_messages(channel, limit)
     
     # گروه‌بندی پیام‌های آلبومی
     messages = group_album_messages(messages, limit=limit)
