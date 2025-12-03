@@ -60,8 +60,14 @@ async def shutdown_event():
         await client.disconnect()
         print("🔌 کلاینت تلگرام قطع شد")
 
-async def get_channel_messages(channel_link: str, limit: int = 50):
-    """دریافت پیام‌های کانال با اطلاعات media"""
+async def get_channel_messages(channel_link: str, limit: int = 50, from_message_id: int = 0):
+    """دریافت پیام‌های کانال با اطلاعات media
+    
+    Args:
+        channel_link: لینک یا ID کانال
+        limit: تعداد پست‌ها (بعد از گروه‌بندی)
+        from_message_id: شروع از این message_id (برای pagination)
+    """
     try:
         # اگر عدد صحیح یا شروع با - باشه، مستقیم به عنوان Channel ID استفاده کن
         if channel_link.lstrip('-').isdigit():
@@ -80,11 +86,11 @@ async def get_channel_messages(channel_link: str, limit: int = 50):
         
         # استراتژی جدید: پیام‌های خام رو بگیر، بعد گروه‌بندی کن و limit اعمال کن
         all_messages = []
-        offset_id = 0
+        offset_id = from_message_id  # شروع از message_id مشخص شده
         
-        # اول یک بار زیاد پیام بگیر (مثلاً 200 تا)
-        # این تضمین می‌کنه که آلبوم‌های ناقص نداریم
-        initial_fetch = min(200, limit * 20)
+        # برای limit های بالا، fetch بیشتری انجام میدیم
+        # برای اطمینان از کامل بودن آلبوم‌ها
+        initial_fetch = limit * 20
         
         while len(all_messages) < initial_fetch:
             batch_size = min(initial_fetch - len(all_messages), 100)
@@ -348,7 +354,9 @@ async def root():
         },
         "examples": {
             "rss": "/rss?channel=@durov&limit=20",
+            "rss_pagination": "/rss?channel=@durov&limit=20&from_message_id=12345",
             "json": "/json?channel=-1001234567890&limit=10",
+            "json_pagination": "/json?channel=-1001234567890&limit=10&from_message_id=12345",
             "download": "/download/-1001234567890/12345/9876543210"
         }
     }
@@ -364,7 +372,7 @@ async def health_check():
     }
 
 @app.get("/rss")
-async def get_rss(channel: str, limit: int = 50):
+async def get_rss(channel: str, limit: int = 50, from_message_id: int = 0):
     """
     دریافت RSS فید
     
@@ -373,13 +381,14 @@ async def get_rss(channel: str, limit: int = 50):
       - پرایوت (invite link): https://t.me/+XXXXX
       - پرایوت (عضو هستید): -1001234567890
     - **limit**: تعداد پست‌ها (بعد از گروه‌بندی آلبوم‌ها)
+    - **from_message_id**: شروع از این message_id (برای pagination، 0 = از جدیدترین)
     """
     if not client or not client.is_connected():
         raise HTTPException(status_code=503, detail="سرویس در دسترس نیست")
     
     try:
         # دریافت پیام‌ها (تابع خودش آلبوم‌های ناقص رو کامل می‌کنه)
-        channel_info, messages = await get_channel_messages(channel, limit)
+        channel_info, messages = await get_channel_messages(channel, limit, from_message_id)
         
         rss_content = create_rss_feed(channel_info, messages, channel, limit)
         
@@ -390,27 +399,36 @@ async def get_rss(channel: str, limit: int = 50):
         raise HTTPException(status_code=500, detail=f"خطا در ساخت RSS: {str(e)}")
 
 @app.get("/json")
-async def get_json(channel: str, limit: int = 50):
+async def get_json(channel: str, limit: int = 50, from_message_id: int = 0):
     """
     دریافت JSON
     
     - **channel**: لینک، یوزرنیم یا ID
     - **limit**: تعداد پست‌ها (بعد از گروه‌بندی)
+    - **from_message_id**: شروع از این message_id (برای pagination، 0 = از جدیدترین)
     """
     if not client or not client.is_connected():
         raise HTTPException(status_code=503, detail="سرویس در دسترس نیست")
     
     # دریافت پیام‌ها (تابع خودش آلبوم‌های ناقص رو کامل می‌کنه)
-    channel_info, messages = await get_channel_messages(channel, limit)
+    channel_info, messages = await get_channel_messages(channel, limit, from_message_id)
     
     # گروه‌بندی پیام‌های آلبومی
     messages = group_album_messages(messages, limit=limit)
+    
+    filtered_messages = [msg for msg in messages if msg.message or msg.media_files]
     
     result = {
         "channel": {
             "id": channel_info.id,
             "title": channel_info.title,
             "username": channel_info.username,
+        },
+        "pagination": {
+            "total": len(filtered_messages),
+            "oldest_message_id": filtered_messages[-1].id if filtered_messages else None,
+            "newest_message_id": filtered_messages[0].id if filtered_messages else None,
+            "next_page_url": f"/json?channel={channel}&limit={limit}&from_message_id={filtered_messages[-1].id}" if filtered_messages else None
         },
         "messages": [
             {
@@ -431,9 +449,8 @@ async def get_json(channel: str, limit: int = 50):
                     for m in msg.media_files
                 ] if msg.media_files else []
             }
-            for msg in messages if msg.message or msg.media_files
-        ],
-        "total": len([m for m in messages if m.message or m.media_files])
+            for msg in filtered_messages
+        ]
     }
     
     return result
